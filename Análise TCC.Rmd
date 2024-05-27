@@ -1,0 +1,424 @@
+---
+title: "Análise TCC"
+output: pdf_document
+date: "2024-04-23"
+---
+
+```{r }
+library(dplyr)
+library(psych)
+library(tidyverse)
+library(haven)
+library(stats)
+library(lavaan)
+library(xlsx)
+library(car)
+library(MKinfer)
+library(boot)
+library(effectsize)
+```
+
+```{r}
+dados_sa <- read_sav("final_1.sav")
+
+#Transformação das variáveis em fatores. O argumento 'order' implica em uma variável categórica ordinal
+
+dados_sa$Sexo <- factor(dados_sa$Sexo, label = c(1, 2), levels = c("Feminino","Masculino"))
+levels(dados_sa$Sexo) <- c("Feminino", "Masculino")
+
+dados_sa$Renda <- factor(dados_sa$Renda,
+                         label = 0:4,
+                         levels = c("Prefiro não declarar", "Até 2 salários mínimos", "2 a 4 salários mínimos", "4 a 10 salários mínimos", "Mais de 10 salários mínimos"), order = T)
+levels(dados_sa$Renda) <- c("Prefiro não declarar", "Até 2 salários mínimos", "2 a 4 salários mínimos", "4 a 10 salários mínimos", "Mais de 10 salários mínimos")
+
+dados_sa$Auxílio <- factor(dados_sa$Auxílio, label = 0:2,
+                           levels = c("Prefiro não declarar", "Sim", "Não"))
+levels(dados_sa$Auxílio) <- c("Prefiro não declarar", "Sim", "Não")
+
+dados_sa$Trabalho <- factor(dados_sa$Trabalho, label = c(1, 2), levels = c("Sim", "Não"))
+levels(dados_sa$Trabalho) <- c("Sim", "Não")
+
+dados_sa$Graduação <- factor(dados_sa$Graduação, label = c(1, 2), levels = c("Sim", "Não"))
+levels(dados_sa$Graduação) <- c("Sim", "Não")
+
+dados_sa$Período <- factor(dados_sa$Período, label = 1:12,
+                           levels = c("1° período", "2° período", "3° período", "4° período", "5° período", "6° período", "7° período", "8° período", "9° período", "10° período", "11° período", "12° período"))
+levels(dados_sa$Período) <- c("1° período", "2° período", "3° período", "4° período", "5° período", "6° período", "7° período", "8° período", "9° período", "10° período", "11° período", "12° período")
+
+#Criando uma variável de acordo com os ciclos do curso de medicina
+
+dados_sa$Período <- as.numeric(dados_sa$Período)
+
+dados_sa$ciclo <- cut(dados_sa$Período, breaks = c(0, 4, 8, 12), labels = c("Básico", "Clínico", "Internato"), include.lowest = T)
+
+dados_sa <- dados_sa %>%
+  relocate(ciclo, .before = Graduação)
+
+#Ler os dados do CRA como numéricos
+
+dados_sa$CRA <- as.numeric(dados_sa$CRA)
+
+#Limpando os itens 'Prefino não declarar' (que foram atribuidos 0), deixando um valor nulo
+
+dados_sa[dados_sa == 0] <- NA
+
+#Ver a estrutura das variáveis
+
+glimpse(dados_sa) 
+```
+
+```{r}
+
+#Obtenção dos dados dos fatores do QAES = média da soma dos itens do fator
+
+dados_sa <- mutate(dados_sa,
+               ProjCar = (QAES5 + QAES10 + QAES15 + QAES20 + QAES25 + QAES30 + QAES35 + QAES40)/8,
+               AdapSoc = (QAES2 + QAES7 + QAES12 + QAES17 + QAES22 + QAES27 + QAES32 + QAES37)/8,
+               AdapPes = (QAES4 + QAES9 + QAES14 + QAES19 + QAES24 + QAES29 + QAES34 + QAES39)/8,
+               Est = (QAES3 + QAES8 + QAES13 + QAES18 + QAES23 + QAES28 + QAES33 + QAES38)/8,
+               Inst = (QAES1 + QAES6 + QAES11 + QAES16 + QAES21 + QAES26 + QAES31 + QAES36)/8)
+
+#Invertendo os escores de itens negativos
+
+dados_sa$ICE3 <- dplyr::recode(dados_sa$ICE3,
+                                    '1' = 5,
+                                    '2' = 4,
+                                    '3' = 3,
+                                    '4' = 2,
+                                    '5' = 1)
+dados_sa$ICE16 <- dplyr::recode(dados_sa$ICE16,
+                                    '1' = 5,
+                                    '2' = 4,
+                                    '3' = 3,
+                                    '4' = 2,
+                                    '5' = 1)
+dados_sa$ICE28 <- dplyr::recode(dados_sa$ICE28,
+                                    '1' = 5,
+                                    '2' = 4,
+                                    '3' = 3,
+                                    '4' = 2,
+                                    '5' = 1)
+
+#Obtenção dos dados dos fatores do ICE-R = média da soma dos itens do fator
+
+dados_sa <- mutate(dados_sa,
+              REOP = (ICE1 + ICE5 + ICE8 + ICE9 + ICE15 + ICE23 + ICE26 + ICE29 + ICE31)/9,
+              REBP = (ICE4 + ICE11 + ICE14 + ICE16 + ICE21 + ICE24 + ICE27)/7,
+              EE =  (ICE6 + ICE18 + ICE28 + ICE32)/4,
+              PE =  (ICE2 + ICE7 + ICE10 + ICE12 + ICE19 + ICE22 + ICE33)/7,
+              REAP =  (ICE3 + ICE13 + ICE17 + ICE20 + ICE25 + ICE30 + ICE34)/7)
+
+#Criação do Fator Geral do ICE-R
+
+dados_sa <- mutate(dados_sa,
+                FG_ICE = (REOP + REBP + EE + PE + REAP)/5)
+
+
+#Dados é um conjunto de dados sem os escores dos itens
+
+dados <- dados_sa[, c("Idade", "Sexo", "CRA", "Auxílio","Renda", "Trabalho","ProjCar", "AdapSoc", "AdapPes", "Est", "Inst", "REOP", "REBP", "EE", "PE", "REAP", "FG_ICE")]
+
+```
+
+```{r}
+
+#Obtenção das estatísticas descritivas
+
+descritivas <- describe(dados, omit = T)
+
+tabela_descritiva <- as.data.frame(descritivas)
+tabela_descritiva <- tabela_descritiva[, !names(tabela_descritiva) %in% c("vars", "n", "median", "trimmed", "mad", "range", "se")]
+colnames(tabela_descritiva) <- c("Média", "Desvio Padrão", "Min", "Max", "Assimetria", "Curtose") 
+tabela_descritiva <- round(tabela_descritiva, 2)
+
+tabela_descritiva_QAES <- tabela_descritiva[c("ProjCar", "AdapSoc", "AdapPes", "Est", "Inst"),]
+
+tabela_descritiva_ICE <- tabela_descritiva[c("REOP", "REBP", "EE", "PE", "REAP"),]
+
+```
+
+```{r}
+# Análise de Correlação dos fatores do QAES e do ICE-R
+
+correlacao_geral <- corr.test(dados[, c("ProjCar", "AdapSoc", "AdapPes", "Est", "Inst", "REOP", "REBP", "EE", "PE", "REAP", "FG_ICE", "CRA")])
+
+tabela_teste <- apa.cor.table(dados_sa[, c("ProjCar", "AdapSoc", "AdapPes", "Est", "Inst", "REOP", "REBP", "EE", "PE", "REAP", "FG_ICE", "CRA")], show.conf.interval = FALSE)
+
+{
+  valores_correlacao <- correlacao_geral$r
+
+valores_p <- correlacao_geral$p
+
+tabela_correlacao <- matrix(NA, nrow = nrow(valores_correlacao), ncol = ncol(valores_correlacao))
+
+tabela_correlacao <- ifelse(valores_p < 0.05, paste0(round(valores_correlacao, 2), "*"), round(valores_correlacao, 2))
+
+tabela_correlacao <- as.matrix(tabela_correlacao)
+} # Transformação em tabela
+
+```
+
+```{r}
+#Cálculo do alfa de Cronbach e Ômega de McDonald dos fatores do ICE-R
+
+{ AlfaREOP <- psych::alpha(dados_sa[, c("ICE1", "ICE5", "ICE8", "ICE9","ICE15", "ICE23", "ICE26", "ICE29", "ICE31")])
+OmegaREOP <- omega(dados_sa[, c("ICE1", "ICE5", "ICE8", "ICE9","ICE15", "ICE23", "ICE26", "ICE29", "ICE31")], nfactors = 1)
+AOREO <- data.frame(AlfaREOP$total, OmegaREOP$omega.group)
+AOREO <- AOREO[, c(1, 10)]
+AOREO <- AOREO[- 2,]
+names(AOREO) <- c("Alfa", "Omega") } # Alfa e Omega REOP
+
+{ AlfaREBP <- psych::alpha(dados_sa[, c("ICE4", "ICE11", "ICE14", "ICE16", "ICE21", "ICE24", "ICE27")])
+OmegaREBP <- omega(dados_sa[, c("ICE4", "ICE11", "ICE14", "ICE16", "ICE21", "ICE24", "ICE27")], nfactors = 1)
+AOREB <- data.frame(AlfaREBP$total, OmegaREBP$omega.group)
+AOREB <- AOREB[, c(1, 10)]
+AOREB <- AOREB[- 2,]
+names(AOREB) <- c("Alfa", "Omega") } # Alfa e Omega REBP
+
+{ AlfaEE <- psych::alpha(dados_sa[, c("ICE6", "ICE18", "ICE28", "ICE32")])
+OmegaEE <- omega(dados_sa[, c("ICE6", "ICE18", "ICE28", "ICE32")], nfactors = 1)
+AOEE <- data.frame(AlfaEE$total, OmegaEE$omega.group)
+AOEE <- AOEE[, c(1, 10)]
+AOEE <- AOEE[- 2,]
+names(AOEE) <- c("Alfa", "Omega") } # Alfa e Omega EE
+
+{ AlfaPE <- psych::alpha(dados_sa[, c("ICE2", "ICE7", "ICE10", "ICE12", "ICE19", "ICE22", "ICE33")])
+OmegaPE <- omega(dados_sa[, c("ICE2", "ICE7", "ICE10", "ICE12", "ICE19", "ICE22", "ICE33")], nfactors = 1)
+AOPE <- data.frame(AlfaPE$total, OmegaPE$omega.group)
+AOPE <- AOPE[, c(1, 10)]
+AOPE <- AOPE[- 2,]
+names(AOPE) <- c("Alfa", "Omega") } # Alfa e Omega PE
+
+{ AlfaREAP <- psych::alpha(dados_sa[, c("ICE3", "ICE13", "ICE17", "ICE20", "ICE25", "ICE30", "ICE34")])
+OmegaREAP <- omega(dados_sa[, c("ICE3", "ICE13", "ICE17", "ICE20", "ICE25", "ICE30", "ICE34")], nfactors = 1)
+AOREA <- data.frame(AlfaREAP$total, OmegaREAP$omega.group)
+AOREA <- AOREA[, c(1, 10)]
+AOREA <- AOREA[- 2,]
+names(AOREA) <- c("Alfa", "Omega") } # Alfa e Omega REAP
+
+{AlfaFG_ICE <- psych::alpha(dados_sa[, c(50:83)])
+OmegaFG_ICE <- omega(dados_sa[, c(50:83)], nfactors = 1)
+AOFG <- data.frame(AlfaFG_ICE$total, OmegaFG_ICE$omega.group)
+AOFG <- AOFG[, c(1, 10)]
+AOFG <- AOFG[- 2,]
+names(AOFG) <- c("Alfa", "Omega")} #Alfa e Omega FG_ICE
+
+AOGeral_ICE <- do.call(rbind, list(AOREO, AOREB, AOEE, AOPE, AOREA, AOFG))
+nomes_ICE <- c("REOP", "REBP", "EE", "PE", "REAP", "FG ICE")
+rownames(AOGeral_ICE) <- nomes_ICE
+
+```
+
+
+```{r}
+#Cálculo do alfa de Cronbach e Ômega de McDonald dos fatores do QAES
+
+{ AlfaProjCar <- psych::alpha(dados_sa[, c("QAES5", "QAES10", "QAES15", "QAES20","QAES25", "QAES30", "QAES35", "QAES40")])
+OmegaProjCar <- omega(dados_sa[, c("QAES5", "QAES10", "QAES15", "QAES20","QAES25", "QAES30", "QAES35", "QAES40")], nfactors = 1)
+AOPC <- data.frame(AlfaProjCar$total, OmegaProjCar$omega.group)
+AOPC <- AOPC[, c(1, 10)]
+AOPC <- AOPC[- 2,]
+names(AOPC) <- c("Alfa", "Omega") } # Alfa e Omega Projeto de Carreira
+
+{ AlfaAdapSoc <- psych::alpha(dados_sa[, c("QAES2", "QAES7", "QAES12", "QAES17","QAES22", "QAES27", "QAES32", "QAES37")])
+OmegaAdapSoc <- omega(dados_sa[, c("QAES2", "QAES7", "QAES12", "QAES17","QAES22", "QAES27", "QAES32", "QAES37")], nfactors = 1)
+AOAS <- data.frame(AlfaAdapSoc$total, OmegaAdapSoc$omega.group)
+AOAS <- AOAS[, c(1, 10)]
+AOAS <- AOAS[- 2,]
+names(AOAS) <- c("Alfa", "Omega") } # Alfa e Omega Adaptação Social
+
+{ AlfaAdapPes <- psych::alpha(dados_sa[, c("QAES4", "QAES9", "QAES14", "QAES19", "QAES24", "QAES29", "QAES34", "QAES39")])
+OmegaAdapPes <- omega(dados_sa[, c("QAES4", "QAES9", "QAES14", "QAES19", "QAES24", "QAES29", "QAES34", "QAES39")], nfactors = 1)
+AOAP <- data.frame(AlfaAdapPes$total, OmegaAdapPes$omega.group)
+AOAP <- AOAP[, c(1, 10)]
+AOAP <- AOAP[- 2,]
+names(AOAP) <- c("Alfa", "Omega") } # Alfa e Omega Adaptação Pessoal
+
+{ AlfaEst <- psych::alpha(dados_sa[, c("QAES3", "QAES8", "QAES13", "QAES18", "QAES23", "QAES28", "QAES33", "QAES38")])
+OmegaEst <- omega(dados_sa[, c("QAES3", "QAES8", "QAES13", "QAES18","QAES23", "QAES28", "QAES33", "QAES38")], nfactors = 1)
+AOE <- data.frame(AlfaEst$total, OmegaEst$omega.group)
+AOE <- AOE[, c(1, 10)]
+AOE <- AOE[- 2,]
+names(AOE) <- c("Alfa", "Omega") } # Alfa e Omega Estudo
+
+{ AlfaInst <- psych::alpha(dados_sa[, c("QAES1", "QAES6", "QAES11", "QAES16","QAES21", "QAES26", "QAES31", "QAES36")])
+OmegaInst <-omega(dados_sa[, c("QAES1", "QAES6", "QAES11", "QAES16", "QAES21", "QAES26", "QAES31", "QAES36")], nfactors = 1)
+AOI <- data.frame(AlfaInst$total, OmegaInst$omega.group)
+AOI <- AOI[, c(1, 10)]
+AOI <- AOI[- 2,]
+names(AOI) <- c("Alfa", "Omega") } # Alfa e Omega Institucional
+
+AOGeral_QAES <- do.call(rbind, list(AOPC, AOAS, AOAP, AOE, AOI))
+nomes_QAES <- c("Projeto de Carreira", "Adaptação Social", "Adaptaçaõ Pessoal", "Estudo", "Institucional")
+rownames(AOGeral_QAES) <- nomes_QAES
+
+```
+
+```{r}
+# Testando pressupostos para Teste t para fatores do QAES
+
+{
+leveneTest(dados_sa$AdapPes, dados_sa$Sexo, center = mean)
+
+shapiro.test(dados_sa$AdapPes)
+
+grupos_sexo_ap <- split(dados_sa$AdapPes, dados_sa$Sexo)
+lapply(grupos_sexo_ap, describe)
+
+boot.t.test(dados_sa$AdapPes ~ dados_sa$Sexo, data = dados_sa)
+
+cohens_d(dados_sa$AdapPes, dados_sa$Sexo)
+} # Teste t diferença para Adaptação Pessoal entre Sexos
+```
+
+
+```{r}
+{
+leveneTest(dados_sa$AdapSoc, dados_sa$Sexo, center = mean)
+
+shapiro.test(dados_sa$AdapSoc)
+
+grupos_sexo_as <- split(dados_sa$AdapSoc, dados_sa$Sexo)
+lapply(grupos_sexo_as, describe)
+
+boot.t.test(dados_sa$AdapSoc ~ dados_sa$Sexo, data = dados_sa)
+} # Teste t diferença para Adaptação Pessoal entre Sexos
+```
+
+
+```{r}
+{
+leveneTest(dados_sa$Est, dados_sa$Sexo, center = mean)
+
+shapiro.test(dados_sa$Est)
+
+grupos_sexo_est <- split(dados_sa$Est, dados_sa$Sexo)
+lapply(grupos_sexo_est, describe)
+
+boot.t.test(dados_sa$Est ~ dados_sa$Sexo, data = dados_sa)
+
+cohens_d(dados_sa$Est, dados_sa$Sexo)
+} # Teste t diferença para Estudo entre Sexos
+```
+
+
+```{r}
+{
+leveneTest(dados_sa$Inst, dados_sa$Sexo, center = mean)
+
+shapiro.test(dados_sa$Inst)
+
+grupos_sexo_in <- split(dados_sa$Inst, dados_sa$Sexo)
+lapply(grupos_sexo_in, describe)
+
+boot.t.test(dados_sa$Inst ~ dados_sa$Sexo, data = dados_sa)
+} # Teste t diferença para Adaptação Institucional entre Sexos
+
+{
+leveneTest(dados_sa$ProjCar, dados_sa$Sexo, center = mean)
+
+shapiro.test(dados_sa$ProjCar)
+
+grupos_sexo_pc <- split(dados_sa$ProjCar, dados_sa$Sexo)
+lapply(grupos_sexo_pc, describe)
+
+boot.t.test(dados_sa$ProjCar ~ dados_sa$Sexo, data = dados_sa)
+} # Teste t diferença para Projeto de Carreira entre Sexos
+
+```
+
+```{r}
+# Testando pressupostos para Teste t para fatores do ICE-R
+
+{
+leveneTest(dados_sa$REOP, dados_sa$Sexo, center = mean)
+
+shapiro.test(dados_sa$REOP)
+
+grupos_sexo_reo <- split(dados_sa$REOP, dados_sa$Sexo)
+lapply(grupos_sexo_reo, describe)
+
+boot.t.test(dados_sa$REOP ~ dados_sa$Sexo, data = dados_sa)
+} # Teste t diferença para REOP entre Sexos
+```
+
+
+```{r}
+{
+leveneTest(dados_sa$REBP, dados_sa$Sexo, center = mean)
+
+shapiro.test(dados_sa$REBP)
+
+grupos_sexo_reb <- split(dados_sa$REBP, dados_sa$Sexo)
+lapply(grupos_sexo_reb, describe)
+
+boot.t.test(dados_sa$REBP ~ dados_sa$Sexo, data = dados_sa)
+} # Teste t diferença para REBP entre Sexos
+```
+
+
+```{r}
+{
+leveneTest(dados_sa$REAP, dados_sa$Sexo, center = mean)
+
+shapiro.test(dados_sa$REAP)
+
+grupos_sexo_rea <- split(dados_sa$REAP, dados_sa$Sexo)
+lapply(grupos_sexo_rea, describe)
+
+boot.t.test(dados_sa$REAP ~ dados_sa$Sexo, data = dados_sa)
+
+cohens_d(dados_sa$REAP, dados_sa$Sexo)
+} # Teste t diferença para REAP entre Sexos
+```
+
+
+```{r}
+{
+leveneTest(dados_sa$EE, dados_sa$Sexo, center = mean)
+
+shapiro.test(dados_sa$EE)
+
+grupos_sexo_ee <- split(dados_sa$EE, dados_sa$Sexo)
+lapply(grupos_sexo_ee, describe)
+
+boot.t.test(dados_sa$EE ~ dados_sa$Sexo, data = dados_sa)
+
+cohens_d(dados_sa$EE, dados_sa$Sexo)
+  } # Teste t diferença para EE entre Sexos
+```
+
+
+```{r}
+{
+leveneTest(dados_sa$PE, dados_sa$Sexo, center = mean)
+
+shapiro.test(dados_sa$PE)
+
+grupos_sexo_pe <- split(dados_sa$PE, dados_sa$Sexo)
+lapply(grupos_sexo_pe, describe)
+
+boot.t.test(dados_sa$PE ~ dados_sa$Sexo, data = dados_sa)
+} # Teste t diferença para PE entre Sexos
+```
+
+
+```{r}
+{
+leveneTest(dados_sa$FG_ICE, dados_sa$Sexo, center = mean)
+
+shapiro.test(dados_sa$FG_ICE)
+
+grupos_sexo_fg <- split(dados_sa$FG_ICE, dados_sa$Sexo)
+lapply(grupos_sexo_fg, describe)
+
+boot.t.test(dados_sa$FG_ICE ~ dados_sa$Sexo, data = dados_sa)
+} # Teste t diferença para FG_ICE entre Sexos
+
+```
+
+```{r}
+ggplot(dados_sa, aes(Inst)) +
+  geom_bar()
+```
+
